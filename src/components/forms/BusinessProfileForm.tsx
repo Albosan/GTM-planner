@@ -4,10 +4,23 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Upload, Brain } from "lucide-react";
-import { useState } from "react";
+import { Upload, Brain, Loader2 } from "lucide-react";
+import { useState, useEffect } from "react";
+import { supabase } from "@/lib/supabase";
+import { useToast } from "@/hooks/use-toast";
 
 export const BusinessProfileForm = () => {
+  const { toast } = useToast();
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [user, setUser] = useState<any>(null);
+  
+  // Check if user is authenticated
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      setUser(user);
+    });
+  }, []);
+
   const [formData, setFormData] = useState({
     businessName: "",
     industry: "",
@@ -18,10 +31,71 @@ export const BusinessProfileForm = () => {
     marketDescription: ""
   });
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Handle form submission - this would integrate with the AI backend
-    console.log("Business profile submitted:", formData);
+    
+    if (!user) {
+      toast({
+        title: "Authentication Required",
+        description: "Please sign in to generate a GTM strategy",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    setIsGenerating(true);
+    
+    try {
+      // Save business profile first
+      const { data: profile, error: profileError } = await supabase
+        .from('business_profiles')
+        .insert({
+          user_id: user.id,
+          business_name: formData.businessName,
+          industry: formData.industry,
+          business_model: formData.businessModel,
+          primary_challenge: formData.challenge,
+          primary_goal: formData.goal,
+          budget_range: formData.budget,
+          target_market: formData.marketDescription
+        })
+        .select()
+        .single();
+
+      if (profileError) throw profileError;
+
+      // Generate GTM strategy
+      const { data, error } = await supabase.functions.invoke('generate-gtm-strategy', {
+        body: { business_profile_id: profile.id }
+      });
+
+      if (error) throw error;
+
+      toast({
+        title: "GTM Strategy Generated!",
+        description: `Your strategy has been created successfully. Credits remaining: ${data.credits_remaining}`,
+      });
+
+      // Reset form
+      setFormData({
+        businessName: "",
+        industry: "",
+        businessModel: "",
+        challenge: "",
+        goal: "",
+        budget: "",
+        marketDescription: ""
+      });
+
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to generate GTM strategy",
+        variant: "destructive",
+      });
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   return (
@@ -162,8 +236,21 @@ export const BusinessProfileForm = () => {
               </div>
               
               <div className="flex gap-4 pt-6">
-                <Button type="submit" variant="hero" size="lg" className="flex-1">
-                  Generate GTM Strategy
+                <Button 
+                  type="submit" 
+                  variant="hero" 
+                  size="lg" 
+                  className="flex-1"
+                  disabled={isGenerating || !user}
+                >
+                  {isGenerating ? (
+                    <>
+                      <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                      Generating Strategy...
+                    </>
+                  ) : (
+                    'Generate GTM Strategy'
+                  )}
                 </Button>
                 <Button type="button" variant="outline" size="lg">
                   Save Draft
